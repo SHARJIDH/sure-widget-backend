@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from dotenv import load_dotenv
 from typing import List
+import httpx
 
 from crewai import Agent, Task, Crew, Process
 from crewai.llm import LLM
@@ -31,10 +32,34 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 CAL_EVENT_URL = os.getenv("CAL_EVENT_URL")
 os.environ["CREWAI_DISABLE_TRACE_PROMPT"] = "true"
 
-# Configure Gemini LLM via LiteLLM wrapper
-gemini_llm = LLM(
-    model="gemini/gemini-2.5-flash",   # LiteLLM expects provider/model format
-    api_key=GEMINI_API_KEY,
+async def fetch_doppler_secret(secret_name: str, agent_id: str) -> str:
+    token = os.getenv("DOPPLER_TOKEN")
+    project = "sure-ai"
+    config = "prd"
+    processed_agent_id = agent_id.replace('-', '_').upper()
+    name = f"{secret_name}_{processed_agent_id}"
+    url = f"https://api.doppler.com/v3/configs/config/secret?project={project}&config={config}&name={name}"
+    headers = {
+        "accept": "application/json",
+        "Authorization": f"Bearer {token}"
+    }
+    async with httpx.AsyncClient() as client:
+        response = await client.get(url, headers=headers)
+        if response.status_code == 200:
+            data = response.json()
+            return data["value"]["raw"]
+        else:
+            raise Exception(f"Failed to fetch {secret_name}: {response.text}")
+
+# Configure Cerebras LLM 
+cerebras_llm = LLM(
+    model="cerebras/llama3.3-70b", # Replace with your chosen Cerebras model name, e.g., "cerebras/llama3.1-8b"
+    api_key=os.environ.get("CEREBRAS_API_KEY"), # Your Cerebras API key
+    base_url="https://api.cerebras.ai/v1",
+    # Optional parameters:
+    # top_p=1,
+    # max_completion_tokens=8192, # Max tokens for the response
+    # response_format={"type": "json_object"} # Ensures the response is in JSON format
 )
 
 # FastAPI app
@@ -50,10 +75,10 @@ class Message(BaseModel):
     StripeEnabled: bool | None = None
     SlackEnabled: bool | None = None
     CalUrl: str | None = None
-    STRIPE_API_KEY: str | None = None
-    SLACK_BOT_TOKEN: str | None = None
-    SLACK_TEAM_ID: str | None = None
-    SLACK_CHANNEL_IDS: str | None = None
+    # STRIPE_API_KEY: str | None = None
+    # SLACK_BOT_TOKEN: str | None = None
+    # SLACK_TEAM_ID: str | None = None
+    # SLACK_CHANNEL_IDS: str | None = None
 
 class ProcessFileRequest(BaseModel):
     url: str
@@ -65,15 +90,37 @@ class ProcessFileResponse(BaseModel):
     message: str
     chunks_processed: int
 
+class VectorSearchRequest(BaseModel):
+    query: str
+    agent_id: str
+    limit: int = 5
+
+class StripeMCPRequest(BaseModel):
+    name: str
+    arguments: dict
+    api_key: str
+
 # Agent will be created per-request in /chat based on enabled tools and provided credentials
 
 
 @app.post("/chat")
 async def chat(msg: Message):
     # Determine enabled capabilities strictly from request (no env fallbacks)
-    stripe_enabled = bool(msg.StripeEnabled) and bool(msg.STRIPE_API_KEY)
-    slack_enabled = bool(msg.SlackEnabled) and bool(msg.SLACK_BOT_TOKEN)
+    stripe_enabled = bool(msg.StripeEnabled)
+    slack_enabled = bool(msg.SlackEnabled)
     cal_enabled = bool(msg.CalEnabled) and bool(msg.CalUrl)
+
+    # Fetch keys from Doppler if enabled
+    stripe_api_key = None
+    slack_bot_token = None
+    slack_team_id = None
+    slack_channel_ids = None
+    if stripe_enabled:
+        stripe_api_key = await fetch_doppler_secret("STRIPE_API_KEY", msg.agentId)
+    if slack_enabled:
+        slack_bot_token = await fetch_doppler_secret("SLACK_BOT_TOKEN", msg.agentId)
+        slack_team_id = await fetch_doppler_secret("SLACK_TEAM_ID", msg.agentId)
+        slack_channel_ids = await fetch_doppler_secret("SLACK_CHANNEL_IDS", msg.agentId)
 
     # Build tool list
     tools_to_use = [vector_search]
@@ -116,23 +163,23 @@ async def chat(msg: Message):
         tools=tools_to_use,
         verbose=True,
         memory=True,
-        llm=gemini_llm,
+        llm=cerebras_llm,
     )
 
     # Tool configuration that MUST be respected by the agent when calling tools
     tool_config_lines = []
     if stripe_enabled:
-        tool_config_lines.append(f"- StripeMCPTool: include api_key='{msg.STRIPE_API_KEY}' in every call.")
+        tool_config_lines.append(f"- StripeMCPTool: include api_key='{stripe_api_key}' in every call.")
     if slack_enabled:
         tool_config_lines.extend([
-            f"- SlackListChannelsTool: include token='{msg.SLACK_BOT_TOKEN}', and either team_id='{msg.SLACK_TEAM_ID}' or channel_ids='{msg.SLACK_CHANNEL_IDS}'.",
-            f"- SlackPostMessageTool: include token='{msg.SLACK_BOT_TOKEN}'.",
-            f"- SlackReplyToThreadTool: include token='{msg.SLACK_BOT_TOKEN}'.",
-            f"- SlackAddReactionTool: include token='{msg.SLACK_BOT_TOKEN}'.",
-            f"- SlackGetChannelHistoryTool: include token='{msg.SLACK_BOT_TOKEN}'.",
-            f"- SlackGetThreadRepliesTool: include token='{msg.SLACK_BOT_TOKEN}'.",
-            f"- SlackGetUsersTool: include token='{msg.SLACK_BOT_TOKEN}', team_id='{msg.SLACK_TEAM_ID}'.",
-            f"- SlackGetUserProfileTool: include token='{msg.SLACK_BOT_TOKEN}'.",
+            f"- SlackListChannelsTool: include token='{slack_bot_token}', and either team_id='{slack_team_id}' or channel_ids='{slack_channel_ids}'.",
+            f"- SlackPostMessageTool: include token='{slack_bot_token}'.",
+            f"- SlackReplyToThreadTool: include token='{slack_bot_token}'.",
+            f"- SlackAddReactionTool: include token='{slack_bot_token}'.",
+            f"- SlackGetChannelHistoryTool: include token='{slack_bot_token}'.",
+            f"- SlackGetThreadRepliesTool: include token='{slack_bot_token}'.",
+            f"- SlackGetUsersTool: include token='{slack_bot_token}', team_id='{slack_team_id}'.",
+            f"- SlackGetUserProfileTool: include token='{slack_bot_token}'.",
         ])
     tool_config = "\n".join(tool_config_lines) if tool_config_lines else "No external tool usage is enabled."
 
