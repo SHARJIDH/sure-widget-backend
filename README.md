@@ -1,118 +1,95 @@
-# Email Builder Agent Architecture
+# AI Agents for Customer Support and Email Building
 
-## Overview
+## Techstack
+
+![Techstack](assets/techstack.png)
+
+## Customer Support Agent
+
+We built the customer_support_agent using the CrewAI framework with Cerebras inference (Llama 3.3-70B) for super fast responses, which is critical in the customer support industry. The agent integrates Retrieval-Augmented Generation (RAG) for querying the knowledge base, Stripe MCP for managing payments and subscriptions, and Slack tools for team communication and notifications. It dynamically configures tools per request based on enabled capabilities.
+
+![Customer Support Agent Architecture](assets/customer_support_agent.png)
+
+### Overview
+
+The Customer Support Agent is an AI-powered assistant that handles customer inquiries using a combination of knowledge base retrieval, payment management, and team communication tools. It provides fast, accurate responses while performing necessary actions like processing refunds or notifying the team.
+
+### Workflow
+
+1. **User Input**: Receives customer message along with agent ID and enabled capabilities (Stripe, Slack, Calendar).
+
+2. **Dynamic Configuration**: Fetches credentials from Doppler and configures available tools (RAG, Stripe MCP, Slack tools).
+
+3. **Agent Execution**: Uses CrewAI to create and run the support agent, which can query knowledge base, manage subscriptions, communicate via Slack, etc.
+
+4. **Response Generation**: Produces a well-structured, polite response to the customer.
+
+### API Endpoints
+
+#### Chat Endpoint
+
+```
+POST /chat
+{
+  "message": "customer inquiry",
+  "agentId": "agent-id",
+  "StripeEnabled": true,
+  "SlackEnabled": false,
+  "CalEnabled": false,
+  "CalUrl": "optional calendar url"
+}
+```
+
+Response:
+
+```json
+{
+  "response": "AI-generated customer response"
+}
+```
+
+#### Process File Endpoint
+
+```
+POST /process-file
+{
+  "url": "file-url",
+  "filename": "file.pdf",
+  "agentId": "agent-id"
+}
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "File processed successfully",
+  "chunks_processed": 10
+}
+```
+
+## Email Builder Agent
+
+We built the email_builder_agent using Cerebras for AI processing, Llama LLM for language understanding, and Exa for web research to gather market insights.
+
+![Email Builder Agent Architecture](assets/email_builder_agent.png)
+
+### Overview
 
 The Email Builder Agent is an AI-powered system that generates professional email templates based on market research and user prompts. It combines web research capabilities with AI content generation to create structured email schemas.
 
-## Workflow Architecture
+### Workflow
 
-```mermaid
-flowchart TD
-    A[User Prompt] --> B[Market Research Agent]
-    B --> C[Competitor Analysis]
-    B --> D[Market Trends & Insights]
-    B --> E[Customer Sentiment & Pain Points]
-    B --> F[Email Strategy Inspiration]
+1. **User Input**: User provides a prompt describing the email campaign.
 
-    C --> G[Web Search via Exa]
-    D --> H[Web Search via Exa]
-    E --> I[Web Search via Exa]
-    F --> J[Web Search via Exa]
+2. **Market Research**: Performs comprehensive research using Exa API for web searching and Cerebras AI for analysis.
 
-    G --> K[Filter Valid Sources]
-    H --> L[Filter Valid Sources]
-    I --> M[Filter Valid Sources]
-    J --> N[Filter Valid Sources]
+3. **Email Generation**: Uses Cerebras AI to generate email schema in JSON format based on research insights.
 
-    K --> O[AI Analysis with Cerebras]
-    L --> P[AI Analysis with Cerebras]
-    M --> Q[AI Analysis with Cerebras]
-    N --> R[AI Analysis with Cerebras]
+4. **Output**: Returns structured email schema with components like LogoHeader, Text, Image, Button, etc.
 
-    O --> S[Collect Research Insights]
-    P --> S
-    Q --> S
-    R --> S
-
-    S --> T[Email Builder Agent]
-    T --> U[Load Prompt Template]
-    U --> V[Incorporate Research Insights]
-    V --> W[Generate Schema with Cerebras AI]
-    W --> X[Clean Markdown Formatting]
-    X --> Y{JSON Parse Success?}
-    Y -->|Yes| Z[Return JSON Schema]
-    Y -->|No| AA[Return String Schema]
-
-    Z --> BB[API Response]
-    AA --> BB
-```
-
-## Detailed Workflow
-
-### 1. User Input
-
-- User provides a prompt describing the email campaign (e.g., "promote our new saas AI image tool")
-
-### 2. Market Research Agent
-
-The agent performs comprehensive market research through four parallel subtasks:
-
-#### Competitor Analysis
-
-- Searches for competitors, their email campaigns, tone, offers, and frequency
-- Identifies market positioning and competitive gaps
-
-#### Market Trends & Insights
-
-- Researches latest trends in the topic area
-- Monitors social media, news, and Google Trends data
-
-#### Customer Sentiment & Pain Points
-
-- Analyzes customer reviews and feedback
-- Gathers insights from forums, Reddit, Quora, and Twitter
-
-#### Email Strategy Inspiration
-
-- Studies effective email marketing strategies
-- Analyzes subject lines, hooks, open rates, and click rates
-
-Each subtask:
-
-1. Performs web search using Exa API (up to 3 results)
-2. Filters results to ensure content quality (>200 characters)
-3. Uses Cerebras AI to summarize key insights into 2-3 bullet points
-
-### 3. Email Builder Agent
-
-Takes the user prompt and research insights to generate the email schema:
-
-1. **Load Template**: Reads the structured prompt from `prompt_email.txt`
-2. **Incorporate Research**: Appends market research insights to the prompt
-3. **AI Generation**: Uses Cerebras AI to generate email schema in JSON format
-4. **Response Processing**:
-   - Strips markdown code block formatting (`json ... `)
-   - Attempts JSON parsing
-   - Returns parsed JSON object or raw string if parsing fails
-
-### 4. Output
-
-Returns a structured email schema containing:
-
-- Logo headers
-- Text content with emojis
-- Images and buttons
-- Multi-column layouts
-- Styling information
-
-## Technical Components
-
-- **Web Research**: Exa API for comprehensive web searching
-- **AI Processing**: Cerebras LLM for both research analysis and content generation
-- **Response Format**: JSON schema following predefined structure with components like LogoHeader, Text, Image, Button, etc.
-- **Error Handling**: Graceful fallback to string response if JSON parsing fails
-
-## API Endpoint
+### API Endpoint
 
 ```
 POST /generate-email-schema
