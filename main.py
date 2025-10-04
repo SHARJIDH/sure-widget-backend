@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from crewai import Agent, Task, Crew, Process
 from crewai.llm import LLM
 
-from database_1 import docs, vx, wait_for_db
+import database_1
 from file_processor import FileProcessor
 from tools.vector_search_tool import vector_search
 from tools.stripe_mcp_tool import stripe_mcp
@@ -160,7 +160,7 @@ def email_builder_agent(prompt, research_insights):
 # Lifespan for database readiness
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await wait_for_db()
+    await database_1.wait_for_db()
     yield
 
 # FastAPI app
@@ -358,9 +358,9 @@ async def process_file(request: ProcessFileRequest):
             records.append((record_id, chunk_data["vector"], metadata))
 
         # Upsert to Supabase vector collection
-        docs.upsert(records=records)
+        database_1.docs.upsert(records=records)
         # Create index for better query performance
-        docs.create_index()
+        database_1.docs.create_index()
         stored_count = len(records)
         
         return ProcessFileResponse(

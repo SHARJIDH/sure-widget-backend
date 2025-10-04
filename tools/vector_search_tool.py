@@ -4,7 +4,7 @@ import os
 
 # Add the root directory to the path to import from root level modules
 
-from database_1 import docs
+import database_1
 from file_processor import FileProcessor
 
 
@@ -23,7 +23,7 @@ def vector_search(query: str, agent_id: str, limit: int = 5) -> str:
         query_embedding = file_processor.generate_embeddings([query])[0]
 
         # Query the vector collection
-        results = docs.query(
+        results = database_1.docs.query(
             data=query_embedding,
             limit=limit,
             filters={"agentId": {"$eq": agent_id}},
