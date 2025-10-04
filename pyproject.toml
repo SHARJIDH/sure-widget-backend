@@ -21,4 +21,6 @@ dependencies = [
     "crewai-tools[mcp]>=0.0.1",
     "mcp>=1.14.0",
     "vecs>=0.4.5",
+    "exa-py>=1.15.6",
+    "cerebras-cloud-sdk>=1.50.1",
 ]

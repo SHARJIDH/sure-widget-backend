@@ -26,6 +26,10 @@ from tools.slack_tools import (
     slack_get_user_profile
 )
 
+# Email Agent imports
+from exa_py import Exa
+from cerebras.cloud.sdk import Cerebras
+
 # Load .env
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -51,7 +55,7 @@ async def fetch_doppler_secret(secret_name: str, agent_id: str) -> str:
         else:
             raise Exception(f"Failed to fetch {secret_name}: {response.text}")
 
-# Configure Cerebras LLM 
+# Configure Cerebras LLM
 cerebras_llm = LLM(
     model="cerebras/llama3.3-70b", # Replace with your chosen Cerebras model name, e.g., "cerebras/llama3.1-8b"
     api_key=os.environ.get("CEREBRAS_API_KEY"), # Your Cerebras API key
@@ -61,6 +65,96 @@ cerebras_llm = LLM(
     # max_completion_tokens=8192, # Max tokens for the response
     # response_format={"type": "json_object"} # Ensures the response is in JSON format
 )
+
+# Email Agents
+client = Cerebras(api_key=os.getenv("CEREBRAS_API_KEY"))
+exa = Exa(api_key=os.getenv("EXA_API_KEY"))
+
+def search_web(query, num=5):
+    result = exa.search_and_contents(
+        query,
+        type="auto",
+        num_results=num,
+        text={"max_characters": 1000}
+    )
+    return result.results
+
+def ask_ai(prompt):
+    chat_completion = client.chat.completions.create(
+        messages=[
+            {
+                "role": "user",
+                "content": prompt,
+            }
+        ],
+        model="llama-4-scout-17b-16e-instruct",
+        max_tokens=2000,
+        temperature=0.2
+    )
+    return chat_completion.choices[0].message.content
+
+def market_research_agent(prompt):
+    topic = prompt
+    print(f"🔍 Market Research Agent activated for: {topic}")
+    subtasks = [
+        {"name": "Competitor Analysis", "query": f"competitors of {topic} email campaigns tone offers frequency positioning gaps"},
+        {"name": "Market Trends & Insights", "query": f"latest trends in {topic} news keywords Twitter Reddit Google Trends"},
+        {"name": "Customer Sentiment & Pain Points", "query": f"customer reviews pain points for {topic} forums Reddit Quora Twitter G2"},
+        {"name": "Email Strategy Inspiration", "query": f"effective email marketing strategies for {topic} subject lines hooks open rates click rates"}
+    ]
+    research_results = []
+    for subtask in subtasks:
+        print(f"🤖 Subagent working on: {subtask['name']}")
+        print(f"   Searching web for: {subtask['query']}")
+        results = search_web(subtask['query'], 3)
+        print(f"   Found {len(results)} raw results")
+        sources = []
+        for result in results:
+            if result.text and len(result.text) > 200:
+                sources.append({"title": result.title, "content": result.text[:500]})
+        print(f"   Filtered to {len(sources)} valid sources")
+        if sources:
+            context = f"Subtask: {subtask['name']}\n\nSources:\n"
+            for i, source in enumerate(sources, 1):
+                context += f"{i}. {source['title']}: {source['content']}...\n\n"
+            analysis_prompt = f"{context}\n\nSummarize key insights for {subtask['name']} related to {topic}. Provide 2-3 bullet points."
+            print(f"   Analyzing with Cerebras AI...")
+            insight = ask_ai(analysis_prompt)
+            print(f"   ✓ Analysis complete for {subtask['name']}")
+            research_results.append({"subtask": subtask['name'], "insights": insight})
+        else:
+            print(f"   ⚠️ No valid sources found for {subtask['name']}")
+            research_results.append({"subtask": subtask['name'], "insights": "No sources found."})
+    print(f"📊 Market Research complete. Gathered insights from {len(research_results)} areas.")
+    return research_results
+
+def email_builder_agent(prompt, research_insights):
+    print(f"📧 Email Builder Agent orchestrating schema generation for: {prompt}")
+    print(f"   Loading prompt template from prompt_email.txt")
+    with open("prompt_email.txt", "r") as f:
+        main_prompt = f.read()
+    main_prompt = main_prompt.replace("${prompt}", prompt)
+    print(f"   Incorporating {len(research_insights)} research insights")
+    research_text = "\n\nMarket Research Insights:\n"
+    for res in research_insights:
+        research_text += f"- {res['subtask']}: {res['insights']}\n"
+    main_prompt += research_text
+    print(f"   Generating email schema with Cerebras AI...")
+    schema = ask_ai(main_prompt)
+    print(f"   ✓ Schema generation complete")
+    import json
+    # Clean up markdown code block formatting if present
+    if schema.startswith("```json"):
+        schema = schema.replace("```json", "").replace("```", "").strip()
+    elif schema.startswith("```"):
+        schema = schema.replace("```", "").strip()
+    try:
+        schema_json = json.loads(schema)
+        print(f"   ✓ Valid JSON schema created with {len(schema_json)} components")
+        return schema_json
+    except json.JSONDecodeError as e:
+        print(f"   ⚠️ Schema returned as string (not valid JSON): {e}")
+        return schema
 
 # FastAPI app
 app = FastAPI()
@@ -99,6 +193,9 @@ class StripeMCPRequest(BaseModel):
     name: str
     arguments: dict
     api_key: str
+
+class EmailSchemaRequest(BaseModel):
+    prompt: str
 
 # Agent will be created per-request in /chat based on enabled tools and provided credentials
 
@@ -275,3 +372,9 @@ async def process_file(request: ProcessFileRequest):
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "message": "RAG processing service is running"}
+
+@app.post("/generate-email-schema")
+async def generate_email_schema(request: EmailSchemaRequest):
+    research = market_research_agent(request.prompt)
+    schema = email_builder_agent(request.prompt, research)
+    return {"schema": schema}
