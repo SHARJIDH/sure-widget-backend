@@ -7,11 +7,12 @@ from sqlalchemy.orm import Session
 from dotenv import load_dotenv
 from typing import List
 import httpx
+from contextlib import asynccontextmanager
 
 from crewai import Agent, Task, Crew, Process
 from crewai.llm import LLM
 
-from database_1 import docs, vx
+from database_1 import docs, vx, wait_for_db
 from file_processor import FileProcessor
 from tools.vector_search_tool import vector_search
 from tools.stripe_mcp_tool import stripe_mcp
@@ -156,8 +157,14 @@ def email_builder_agent(prompt, research_insights):
         print(f"   ⚠️ Schema returned as string (not valid JSON): {e}")
         return schema
 
+# Lifespan for database readiness
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await wait_for_db()
+    yield
+
 # FastAPI app
-app = FastAPI()
+app = FastAPI(lifespan=lifespan)
 
 # Initialize file processor
 file_processor = FileProcessor()
