@@ -2,7 +2,7 @@
 
 ## Techstack
 
-![Techstack](assets/techstack.png)
+![Techstack](assets/techStack.png)
 
 ## Customer Support Agent
 
